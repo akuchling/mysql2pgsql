@@ -1,0 +1,16 @@
+# Remove backquotes around names
+#
+
+Data type changes: bigint(8) -> integer, integer(11) -> integer, double -> double precision, datetime -> timestamp, bigint NOT NULL auto_increment -> bigserial, mediumtext -> text, blob->bytea, enum -> varchar or equivalent.
+# Change usage of \' to \'\', or use E\'\' syntax.
+# Remove ENGINE=xxx, DEFAULT CHARSET=latin1, AUTO_INCREMENT declarations
+# Comment out LOCK TABLES, UNLOCK TABLES; KEY idx_xxx in CREATE TABLE.
+# KEY, UNIQUE KEY declarations need translating
+# XXX PostgreSQL needs you to remove the trailing commas in CREATE TABLE
+# XXX need to fix auto_increment
+# Election.end; 'end' is a reserved keyword.
+#
+
+ProcessorAccount: 'user' is a reserved keyword.
+# 'User' is a reserved keyword.
+# pleasewait.starttime has 'on update' trigger. 
