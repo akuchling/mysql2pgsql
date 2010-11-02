@@ -21,6 +21,12 @@ def convert_type(typ):
     # XXX implement conversion
     return typ
 
+def convert_data(col, data):
+    """(Column, any) : any
+
+    Convert a Python value retrieved from MySQL into a PostgreSQL value.
+    """
+
 class Column:
     """
     Represents a column.
@@ -133,12 +139,13 @@ SELECT * FROM information_schema.tables WHERE table_schema = '?'
     tables = sorted(row['TABLE_NAME'] for row in mysql_cur.fetchall())
 
     # Convert tables
+    table_cols = {}
     for table in tables:
         mysql_cur.execute("""
 SELECT * FROM information_schema.columns
 WHERE table_schema = ? and table_name = ?
 """, (mysql_db, table))
-        cols = []
+        cols = table_cols[table] = []
         for row in mysql_cur.fetchall():
             c = Column()
             cols.append(c)
@@ -179,22 +186,48 @@ WHERE table_schema = ? AND table_name = ?
             assert len(primary_L) == 1
             primary = primary_L.pop()
             sql += 'PRIMARY KEY %s' % primary.column_name
-            
+
 
         sql += ');'
         pg_execute(pg_conn, sql)
-        
+
         # Create indexes
         for i in indexes:
             if i.name == 'PRIMARY':
                 continue
-        
+
             sql = i.pg_decl()
             pg_execute(pg_conn, sql)
 
 
     for table in tables:
         # Convert data.
+        mysql_cur.execute("SELECT * FROM ?", table)
+        cols = table_cols[table]
+
+        # Assemble the INSERT statement once.
+        ins_sql = ('INSERT INTO %s (%s) VALUES (%s);' %
+                   (table,
+                    ', '.join(c.name for c in cols),
+                    ','.join(['?'] * len(cols))))
+
+        # We don't do a fetchall() since the table contents are
+        # very likely to not fit into memory.
+        while True:
+            row = mysql_cur.fetchone()
+            if row is None:
+                continue
+
+            # Assemble a list of the output data that we'll subsequently
+            # convert to a tuple.
+            output_L = []
+            for c in cols:
+                data = row[c.name]
+                newdata = convert_data(c, data)
+                output_L.append(newdata)
+
+            pg_cur.execute(ins_sql, tuple(output_L))
+
         pass
 
     # Close connections
