@@ -4,6 +4,85 @@ import sys
 import optparse
 import MySQLdb, psycopg2
 
+def pg_execute(pg_conn, sql):
+    """(Connection, str)
+
+    Log and execute a SQL command on the PostgreSQL connection.
+    """
+    print sql
+    # XXX execute command
+
+def convert_type(typ):
+    """(str): str
+
+    Parses a MySQL type declaration and returns the corresponding PostgreSQL
+    type.
+    """
+    # XXX implement conversion
+    return typ
+
+class Column:
+    """
+    Represents a column.
+
+    Instance attributes:
+    name : str
+    type : str
+    position : int
+    default : str
+    is_nullable : bool
+
+    """
+
+    def __init__(self, **kw):
+        for k,v in kw.items():
+            setattr(self, k, v)
+
+    def pg_decl(self):
+        """(): str
+
+        Return the PostgreSQL declaration syntax for this column.
+        """
+        typ = convert_type(self.type)
+        decl = '%s %s' % (self.name, typ)
+        if self.default:
+            decl += ' ' + self.default
+        if not self.is_nullable:
+            decl += ' NOT NULL'
+        return decl
+
+class Index:
+    """
+    Represents an index.
+
+    Instance attributes:
+    name : str
+    table : str
+    type : str
+    column_name : str
+    non_unique : bool
+    nullable : bool
+
+    """
+
+    def __init__(self, **kw):
+        for k,v in kw.items():
+            setattr(self, k, v)
+
+    def pg_decl(self):
+        """(): str
+
+        Return the PostgreSQL declaration syntax for this index.
+        """
+        sql = 'CREATE INDEX %s ON %s' % (self.name, self.table)
+        if self.index_type:
+            # XXX convert index_type:
+            # BTREE, etc.
+            pass
+        return sql
+
+
+
 def main ():
     parser = optparse.OptionParser(
         '%prog [options] mysql-host mysql-db pg-host pg-db')
@@ -44,16 +123,86 @@ def main ():
         user=options.pg_user,
         password=options.pg_password,
         )
+    mysql_cur = mysql_conn.Cursor()
+    pg_cur = pg_conn.Cursor()
 
+    # Make list of tables to process.
+    mysql_cur.execute("""
+SELECT * FROM information_schema.tables WHERE table_schema = '?'
+""", mysql_db)
+    tables = sorted(row['TABLE_NAME'] for row in mysql_cur.fetchall())
 
     # Convert tables
+    for table in tables:
+        mysql_cur.execute("""
+SELECT * FROM information_schema.columns
+WHERE table_schema = ? and table_name = ?
+""", (mysql_db, table))
+        cols = []
+        for row in mysql_cur.fetchall():
+            c = Column()
+            cols.append(c)
+            c.name = row['COLUMN_NAME']
+            c.type = row['COLUMN_TYPE']  #
+            c.position = row['ORDINAL_POSITION']
+            c.default = row['COLUMN_DEFAULT']
+            c.is_nullable = bool(row['IS_NULLABLE'] == 'YES')
+            # XXX character set?
+
+        # Sort columns into left-to-right order.
+        cols.sort(key=lambda c: c.position)
+
+        # Convert indexes
+        mysql_cur.execute("""
+SELECT * FROM information_schema.statistics
+WHERE table_schema = ? AND table_name = ?
+""", (mysql_db, table))
+        indexes = []
+        for row in mysql_cur.fetchall():
+            i = Index()
+            indexes.append(i)
+            i.table = table
+            i.name = row['INDEX_NAME']
+            i.column_name = row['COLUMN_NAME']
+            i.type = row['INDEX_TYPE']
+            i.non_unique = bool(row['NON_UNIQUE'])
+            i.nullable = bool(row['NULLABLE'] == 'YES')
+
+        # Assemble into a PGSQL declaration
+        sql = "CREATE TABLE (\n"
+        for c in column:
+            sql += ' ' + c.pg_decl() + ',\n'
+
+        # Look for index named PRIMARY, and add PRIMARY KEY if found.
+        primary_L = [i for i in indexes if i.name == 'PRIMARY']
+        if len(primary_L):
+            assert len(primary_L) == 1
+            primary = primary_L.pop()
+            sql += 'PRIMARY KEY %s' % primary.column_name
+            
+
+        sql += ');'
+        pg_execute(pg_conn, sql)
+        
+        # Create indexes
+        for i in indexes:
+            if i.name == 'PRIMARY':
+                continue
+        
+            sql = i.pg_decl()
+            pg_execute(pg_conn, sql)
+
+
+    for table in tables:
+        # Convert data.
+        pass
 
     # Close connections
     mysql_conn.close()
     pg_conn.close()
-        
-        
-    
+
+
+
 
 
 if __name__ == '__main__':
